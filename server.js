@@ -3,6 +3,43 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 const filter = require('leo-profanity');
+const multer = require('multer');
+const fs = require('fs');
+
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer for image uploads
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, uploadsDir);
+    },
+    filename: function (req, file, cb) {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+    }
+});
+
+const upload = multer({
+    storage: storage,
+    limits: {
+        fileSize: 5 * 1024 * 1024 // 5MB limit
+    },
+    fileFilter: function (req, file, cb) {
+        const allowedTypes = /jpeg|jpg|png|gif|bmp|webp|svg|tiff|ico/;
+        const mimeType = allowedTypes.test(file.mimetype);
+        const extName = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+        
+        if (mimeType && extName) {
+            return cb(null, true);
+        } else {
+            cb(new Error('Only image files are allowed!'));
+        }
+    }
+});
 
 const app = express();
 const server = http.createServer(app);
@@ -28,6 +65,28 @@ const onlineUsers = {};
 
 // Serve static files from current directory
 app.use(express.static(__dirname));
+
+// Serve uploaded images
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Parse JSON body
+app.use(express.json());
+
+// Image upload endpoint
+app.post('/upload-image', upload.single('image'), (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No image file provided' });
+        }
+        
+        const imageUrl = `/uploads/${req.file.filename}`;
+        console.log('Image uploaded:', imageUrl);
+        res.json({ imageUrl: imageUrl });
+    } catch (error) {
+        console.error('Image upload error:', error);
+        res.status(500).json({ error: 'Image upload failed' });
+    }
+});
 
 // Routes
 app.get('/', (req, res) => {
@@ -326,6 +385,28 @@ io.on('connection', (socket) => {
             delete onlineUsers[username];
             io.emit('user left', username);
         }
+    });    // Handle image message
+    socket.on('image-message', (data) => {
+        const timestamp = new Date().toLocaleString();
+        
+        const imageMessage = {
+            username: data.username,
+            text: data.text || '', // Optional text with image
+            imageUrl: data.imageUrl,
+            timestamp: timestamp,
+            type: 'image'
+        };
+        
+        // Store message (keep only last 20)
+        messages.push(imageMessage);
+        if (messages.length > maxMessages) {
+            messages.shift();
+        }
+        
+        console.log(`Image message from ${data.username}: ${data.imageUrl}`);
+        
+        // Broadcast image message to all users
+        io.emit('message', imageMessage);
     });
 
     // Handle disconnect

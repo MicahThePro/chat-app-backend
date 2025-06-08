@@ -10,7 +10,9 @@ const io = socketIo(server, {
         origin: [
             "http://localhost:3000",
             "http://localhost:5000",
-            "https://nord-chat.netlify.app" // Your actual Netlify URL (no trailing slash)
+            "https://nord-chat.netlify.app", // Old Netlify URL
+            "https://micahswebsite.xyz", // Your custom domain
+            "http://micahswebsite.xyz"   // HTTP version (just in case)
         ],
         methods: ["GET", "POST"]
     }
@@ -57,9 +59,7 @@ io.on('connection', (socket) => {
         
         // Send last 20 messages to new user
         socket.emit('load messages', messages);
-    });
-
-    // Handle new messages
+    });    // Handle new messages
     socket.on('message', (msg) => {
         const timestamp = new Date().toLocaleString();
         const messageWithTimestamp = {
@@ -77,6 +77,57 @@ io.on('connection', (socket) => {
         
         // Broadcast message to all users
         io.emit('message', messageWithTimestamp);
+    });
+
+    // Handle 8-ball command
+    socket.on('8ball', (data) => {
+        const { question } = data;
+        const timestamp = new Date().toLocaleString();
+        
+        // Magic 8-Ball responses
+        const responses = [
+            "It is certain.",
+            "It is decidedly so.",
+            "Without a doubt.",
+            "Yes definitely.",
+            "You may rely on it.",
+            "As I see it, yes.",
+            "Most likely.",
+            "Outlook good.",
+            "Yes.",
+            "Signs point to yes.",
+            "Reply hazy, try again.",
+            "Ask again later.",
+            "Better not tell you now.",
+            "Cannot predict now.",
+            "Concentrate and ask again.",
+            "Don't count on it.",
+            "My reply is no.",
+            "My sources say no.",  
+            "Outlook not so good.",
+            "Very doubtful."
+        ];
+        
+        // Get random response
+        const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+        
+        // Create 8-Ball message
+        const eightBallMessage = {
+            username: "🎱 8-Ball",
+            text: `🔮 "${question}"\n\n${randomResponse}`,
+            timestamp: timestamp
+        };
+        
+        // Store message (keep only last 20)
+        messages.push(eightBallMessage);
+        if (messages.length > maxMessages) {
+            messages.shift();
+        }
+        
+        console.log(`8-Ball responded to: ${question}`);
+        
+        // Broadcast 8-Ball response to all users
+        io.emit('message', eightBallMessage);
     });
 
     // Handle clear messages

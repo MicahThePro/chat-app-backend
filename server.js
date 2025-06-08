@@ -10,7 +10,7 @@ const io = socketIo(server, {
         origin: [
             "http://localhost:3000",
             "http://localhost:5000",
-            "https://nord-chat.netlify.app/" // Replace with your actual Netlify URL
+            "https://nord-chat.netlify.app" // Your actual Netlify URL (no trailing slash)
         ],
         methods: ["GET", "POST"]
     }

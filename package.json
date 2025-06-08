@@ -9,12 +9,18 @@
   },
   "dependencies": {
     "express": "^4.18.2",
+    "leo-profanity": "^1.7.0",
     "socket.io": "^4.7.2"
   },
   "engines": {
     "node": ">=16.0.0"
   },
-  "keywords": ["chat", "real-time", "socket.io", "express"],
+  "keywords": [
+    "chat",
+    "real-time",
+    "socket.io",
+    "express"
+  ],
   "author": "Micah",
   "license": "MIT"
 }

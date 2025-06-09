@@ -47,9 +47,7 @@ function getLocalTimestamp() {
 const messages = [];
 const maxMessages = 20;
 const onlineUsers = {};
-
-// Store active trivia sessions
-const activeTrivia = new Map(); // questionId -> { question, answer, askedBy, answeredBy: Set() }
+const userIPs = new Map(); // Track user IPs
 
 // Serve static files from current directory
 app.use(express.static(__dirname));
@@ -70,24 +68,33 @@ app.get('/health', (req, res) => {
 // Socket.IO connection handling
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
+    
+    // Store user IP
+    const userIP = socket.handshake.address || socket.request.connection.remoteAddress || 'unknown';
+    userIPs.set(socket.id, userIP);
 
     // Handle user joining
     socket.on('join', (data) => {
         const { username } = data;
-        const userIP = socket.handshake.address;
+        const userIP = userIPs.get(socket.id) || 'unknown';
         
         console.log(`User ${username} joined from IP: ${userIP}`);
         
-        onlineUsers[username] = socket.id;
+        onlineUsers[username] = { socketId: socket.id, ip: userIP };
         
-        // Broadcast user joined
-        io.emit('user joined', username);
+        // Broadcast user joined with IP
+        io.emit('user joined', { username, ip: userIP });
         
-        // Send last 20 messages to new user
-        socket.emit('load messages', messages);
+        // Send last 20 messages to new user with IP addresses
+        const messagesWithIPs = messages.map(msg => ({
+            ...msg,
+            ip: msg.ip || 'unknown'
+        }));
+        socket.emit('load messages', messagesWithIPs);
     });    // Handle new messages
     socket.on('message', (msg) => {
         const timestamp = getLocalTimestamp();
+        const userIP = userIPs.get(socket.id) || 'unknown';
         
         // Check for trivia answers first (before profanity filter)
         const userAnswer = msg.text.trim().toLowerCase();
@@ -174,7 +181,8 @@ io.on('connection', (socket) => {
         
         const messageWithTimestamp = {
             ...msg,
-            timestamp: timestamp
+            timestamp: timestamp,
+            ip: userIP
         };
         
         // Store message (keep only last 20)
@@ -183,14 +191,15 @@ io.on('connection', (socket) => {
             messages.shift();
         }
         
-        console.log(`Message from ${msg.username}: ${msg.text}`);
+        console.log(`Message from ${msg.username} (${userIP}): ${msg.text}`);
         
-        // Broadcast message to all users
+        // Broadcast message to all users with IP
         io.emit('message', messageWithTimestamp);
     });// Handle 8-ball command
     socket.on('8ball', (data) => {
         const { question } = data;
         const timestamp = getLocalTimestamp();
+        const userIP = userIPs.get(socket.id) || 'unknown';
         
         // Magic 8-Ball responses
         const responses = [
@@ -223,18 +232,16 @@ io.on('connection', (socket) => {
         const eightBallMessage = {
             username: "🎱 8-Ball",
             text: `🔮 "${question}"\n\n${randomResponse}`,
-            timestamp: timestamp
+            timestamp: timestamp,
+            ip: 'bot'
         };
         
-        // Store message (keep only last 20)
         messages.push(eightBallMessage);
         if (messages.length > maxMessages) {
             messages.shift();
         }
         
         console.log(`8-Ball responded to: ${question}`);
-        
-        // Broadcast 8-Ball response to all users
         io.emit('message', eightBallMessage);
     });
 
@@ -358,7 +365,8 @@ io.on('connection', (socket) => {
         const jokeMessage = {
             username: "😂 Joke Bot",
             text: `🎭 ${randomJoke}`,
-            timestamp: timestamp
+            timestamp: timestamp,
+            ip: 'bot'
         };
         
         // Store message (keep only last 20)
@@ -805,6 +813,7 @@ io.on('connection', (socket) => {
             delete onlineUsers[username];
             io.emit('user left', username);
         }
+        userIPs.delete(socket.id);
     });
 
     // Handle disconnect
@@ -812,13 +821,14 @@ io.on('connection', (socket) => {
         console.log('User disconnected:', socket.id);
         
         // Find and remove user from online users
-        for (const [username, id] of Object.entries(onlineUsers)) {
-            if (id === socket.id) {
+        for (const [username, userData] of Object.entries(onlineUsers)) {
+            if (userData.socketId === socket.id) {
                 delete onlineUsers[username];
                 io.emit('user left', username);
                 break;
             }
         }
+        userIPs.delete(socket.id);
     });
 });
 

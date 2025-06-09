@@ -29,9 +29,6 @@ const onlineUsers = {};
 // Serve static files from current directory
 app.use(express.static(__dirname));
 
-// Parse JSON body
-app.use(express.json());
-
 // Routes
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
@@ -314,6 +311,249 @@ io.on('connection', (socket) => {
         
         // Broadcast flip result to all users
         io.emit('message', flipMessage);
+    });
+
+    // Handle roll command
+    socket.on('roll', (data) => {
+        const { number } = data;
+        const timestamp = new Date().toLocaleString();
+        
+        // Parse the number or default to 6
+        const maxNumber = parseInt(number) || 6;
+        const validMax = Math.min(Math.max(maxNumber, 2), 1000); // Between 2 and 1000
+        
+        const result = Math.floor(Math.random() * validMax) + 1;
+        
+        const rollMessage = {
+            username: "🎲 Dice Roll",
+            text: `🎯 *rolls a ${validMax}-sided die* \n\n**${result}!**`,
+            timestamp: timestamp
+        };
+        
+        messages.push(rollMessage);
+        if (messages.length > maxMessages) {
+            messages.shift();
+        }
+        
+        console.log(`Dice roll (1-${validMax}): ${result}`);
+        io.emit('message', rollMessage);
+    });
+
+    // Handle quote command
+    socket.on('quote', () => {
+        const timestamp = new Date().toLocaleString();
+        
+        const quotes = [
+            "The only way to do great work is to love what you do. - Steve Jobs",
+            "Innovation distinguishes between a leader and a follower. - Steve Jobs",
+            "Life is what happens to you while you're busy making other plans. - John Lennon",
+            "The future belongs to those who believe in the beauty of their dreams. - Eleanor Roosevelt",
+            "It is during our darkest moments that we must focus to see the light. - Aristotle",
+            "The way to get started is to quit talking and begin doing. - Walt Disney",
+            "Don't let yesterday take up too much of today. - Will Rogers",
+            "You learn more from failure than from success. Don't let it stop you. - Unknown",
+            "If you are working on something that you really care about, you don't have to be pushed. - Steve Jobs",
+            "Experience is a hard teacher because she gives the test first, the lesson afterwards. - Vernon Law",
+            "To live is the rarest thing in the world. Most people just exist. - Oscar Wilde",
+            "Success is not final, failure is not fatal: it is the courage to continue that counts. - Winston Churchill",
+            "The only impossible journey is the one you never begin. - Tony Robbins",
+            "In the midst of winter, I found there was, within me, an invincible summer. - Albert Camus",
+            "Be yourself; everyone else is already taken. - Oscar Wilde",
+            "Two things are infinite: the universe and human stupidity; I'm not sure about the universe. - Albert Einstein",
+            "Be the change you wish to see in the world. - Mahatma Gandhi",
+            "A room without books is like a body without a soul. - Marcus Tullius Cicero",
+            "You only live once, but if you do it right, once is enough. - Mae West",
+            "Insanity is doing the same thing over and over again and expecting different results. - Albert Einstein"
+        ];
+        
+        const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+        
+        const quoteMessage = {
+            username: "💭 Quote Bot",
+            text: `✨ ${randomQuote}`,
+            timestamp: timestamp
+        };
+        
+        messages.push(quoteMessage);
+        if (messages.length > maxMessages) {
+            messages.shift();
+        }
+        
+        console.log('Quote command used');
+        io.emit('message', quoteMessage);
+    });
+
+    // Handle time command
+    socket.on('time', () => {
+        const timestamp = new Date().toLocaleString();
+        
+        const now = new Date();
+        const timeZones = [
+            { name: 'UTC', time: now.toISOString().slice(11, 19) + ' UTC' },
+            { name: 'New York', time: now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true }) + ' EST/EDT' },
+            { name: 'Los Angeles', time: now.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour12: true }) + ' PST/PDT' },
+            { name: 'London', time: now.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour12: false }) + ' GMT/BST' },
+            { name: 'Tokyo', time: now.toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour12: false }) + ' JST' }
+        ];
+        
+        const timeText = timeZones.map(tz => `**${tz.name}:** ${tz.time}`).join('\n');
+        
+        const timeMessage = {
+            username: "🕐 World Clock",
+            text: `🌍 **Current Time Around the World:**\n\n${timeText}`,
+            timestamp: timestamp
+        };
+        
+        messages.push(timeMessage);
+        if (messages.length > maxMessages) {
+            messages.shift();
+        }
+        
+        console.log('Time command used');
+        io.emit('message', timeMessage);
+    });
+
+    // Handle weather command
+    socket.on('weather', (data) => {
+        const { city } = data;
+        const timestamp = new Date().toLocaleString();
+        
+        // Simulated weather data
+        const weatherConditions = [
+            'Sunny ☀️', 'Partly Cloudy ⛅', 'Cloudy ☁️', 'Rainy 🌧️', 
+            'Stormy ⛈️', 'Snowy ❄️', 'Foggy 🌫️', 'Windy 💨'
+        ];
+        
+        const condition = weatherConditions[Math.floor(Math.random() * weatherConditions.length)];
+        const temp = Math.floor(Math.random() * 40) + 5; // 5-45°C
+        const humidity = Math.floor(Math.random() * 60) + 30; // 30-90%
+        
+        const cityName = city || 'Unknown Location';
+        
+        const weatherMessage = {
+            username: "🌤️ Weather Bot",
+            text: `🏙️ **Weather in ${cityName}:**\n\n🌡️ **Temperature:** ${temp}°C\n🌈 **Condition:** ${condition}\n💧 **Humidity:** ${humidity}%\n\n*Note: This is simulated weather data*`,
+            timestamp: timestamp
+        };
+        
+        messages.push(weatherMessage);
+        if (messages.length > maxMessages) {
+            messages.shift();
+        }
+        
+        console.log(`Weather command used for: ${cityName}`);
+        io.emit('message', weatherMessage);
+    });
+
+    // Handle trivia command
+    socket.on('trivia', () => {
+        const timestamp = new Date().toLocaleString();
+        
+        const triviaQuestions = [
+            { q: "What is the capital of Australia?", a: "Canberra" },
+            { q: "How many hearts does an octopus have?", a: "Three" },
+            { q: "What year was the first iPhone released?", a: "2007" },
+            { q: "What is the largest planet in our solar system?", a: "Jupiter" },
+            { q: "Who painted the Mona Lisa?", a: "Leonardo da Vinci" },
+            { q: "What is the chemical symbol for gold?", a: "Au" },
+            { q: "How many bones are in the human body?", a: "206" },
+            { q: "What is the fastest land animal?", a: "Cheetah" },
+            { q: "In which year did World War II end?", a: "1945" },
+            { q: "What is the smallest country in the world?", a: "Vatican City" },
+            { q: "How many strings does a standard guitar have?", a: "Six" },
+            { q: "What is the largest ocean on Earth?", a: "Pacific Ocean" },
+            { q: "Who wrote 'Romeo and Juliet'?", a: "William Shakespeare" },
+            { q: "What is the hardest natural substance?", a: "Diamond" },
+            { q: "How many minutes are in a full week?", a: "10,080" },
+            { q: "What language is spoken in Brazil?", a: "Portuguese" },
+            { q: "How many sides does a hexagon have?", a: "Six" },
+            { q: "What is the currency of Japan?", a: "Yen" },
+            { q: "Which planet is known as the Red Planet?", a: "Mars" },
+            { q: "What does 'WWW' stand for?", a: "World Wide Web" }
+        ];
+        
+        const randomTrivia = triviaQuestions[Math.floor(Math.random() * triviaQuestions.length)];
+        
+        const triviaMessage = {
+            username: "🧠 Trivia Bot",
+            text: `❓ **Trivia Question:**\n\n${randomTrivia.q}\n\n💡 **Answer:** ||${randomTrivia.a}|| (hover to reveal)`,
+            timestamp: timestamp
+        };
+        
+        messages.push(triviaMessage);
+        if (messages.length > maxMessages) {
+            messages.shift();
+        }
+        
+        console.log('Trivia command used');
+        io.emit('message', triviaMessage);
+    });
+
+    // Handle countdown command
+    socket.on('countdown', (data) => {
+        const { seconds } = data;
+        const timestamp = new Date().toLocaleString();
+        
+        const countdownSeconds = Math.min(Math.max(parseInt(seconds) || 10, 1), 300); // 1-300 seconds
+        
+        const countdownMessage = {
+            username: "⏰ Countdown Timer",
+            text: `🚀 **Countdown Started:** ${countdownSeconds} seconds\n\n⏳ Timer is running...`,
+            timestamp: timestamp
+        };
+        
+        messages.push(countdownMessage);
+        if (messages.length > maxMessages) {
+            messages.shift();
+        }
+        
+        console.log(`Countdown started: ${countdownSeconds} seconds`);
+        io.emit('message', countdownMessage);
+        
+        // Send countdown completion message after specified time
+        setTimeout(() => {
+            const completeMessage = {
+                username: "⏰ Countdown Timer",
+                text: `🎉 **Time's Up!** The ${countdownSeconds}-second countdown has finished!`,
+                timestamp: new Date().toLocaleString()
+            };
+            
+            messages.push(completeMessage);
+            if (messages.length > maxMessages) {
+                messages.shift();
+            }
+            
+            io.emit('message', completeMessage);
+        }, countdownSeconds * 1000);
+    });
+
+    // Handle random command
+    socket.on('random', (data) => {
+        const { min, max } = data;
+        const timestamp = new Date().toLocaleString();
+        
+        const minNum = parseInt(min) || 1;
+        const maxNum = parseInt(max) || 100;
+        
+        // Ensure min is less than or equal to max
+        const actualMin = Math.min(minNum, maxNum);
+        const actualMax = Math.max(minNum, maxNum);
+        
+        const randomNumber = Math.floor(Math.random() * (actualMax - actualMin + 1)) + actualMin;
+        
+        const randomMessage = {
+            username: "🎯 Random Number",
+            text: `🔢 **Random number between ${actualMin} and ${actualMax}:**\n\n**${randomNumber}**`,
+            timestamp: timestamp
+        };
+        
+        messages.push(randomMessage);
+        if (messages.length > maxMessages) {
+            messages.shift();
+        }
+        
+        console.log(`Random number generated: ${randomNumber} (${actualMin}-${actualMax})`);
+        io.emit('message', randomMessage);
     });
 
     // Handle clear messages

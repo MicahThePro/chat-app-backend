@@ -123,7 +123,7 @@ io.on('connection', (socket) => {
                 
                 const wrongMessage = {
                     username: "🧠 Trivia Bot", 
-                    text: `❌ Not quite, ${msg.username}! Keep guessing...`,
+                    text: `❌ Not quite, ${msg.username}! Try again another time!`,
                     timestamp: timestamp
                 };
                 

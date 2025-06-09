@@ -21,6 +21,23 @@ const io = socketIo(server, {
 
 const PORT = process.env.PORT || 5000;
 
+// Helper function to get local timestamp
+function getLocalTimestamp() {
+    // You can change this timezone to match your location
+    // Common US timezones: 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'
+    // To find your timezone: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+    return new Date().toLocaleString('en-US', { 
+        timeZone: 'America/New_York', // Change this to your timezone
+        hour12: true,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+}
+
 // Store messages and online users
 const messages = [];
 const maxMessages = 20;
@@ -62,7 +79,7 @@ io.on('connection', (socket) => {
         socket.emit('load messages', messages);
     });    // Handle new messages
     socket.on('message', (msg) => {
-        const timestamp = new Date().toLocaleString();
+        const timestamp = getLocalTimestamp();
           // Check for profanity in the message
         if (filter.check(msg.text)) {
             // Send a message indicating profanity was attempted
@@ -103,7 +120,7 @@ io.on('connection', (socket) => {
     });// Handle 8-ball command
     socket.on('8ball', (data) => {
         const { question } = data;
-        const timestamp = new Date().toLocaleString();
+        const timestamp = getLocalTimestamp();
         
         // Magic 8-Ball responses
         const responses = [
@@ -153,7 +170,7 @@ io.on('connection', (socket) => {
 
     // Handle joke command
     socket.on('joke', () => {
-        const timestamp = new Date().toLocaleString();
+        const timestamp = getLocalTimestamp();
         
         // Massive list of jokes
         const jokes = [
@@ -288,7 +305,7 @@ io.on('connection', (socket) => {
 
     // Handle flip command
     socket.on('flip', () => {
-        const timestamp = new Date().toLocaleString();
+        const timestamp = getLocalTimestamp();
         
         // Coin flip results
         const results = ['Heads', 'Tails'];
@@ -316,7 +333,7 @@ io.on('connection', (socket) => {
     // Handle roll command
     socket.on('roll', (data) => {
         const { number } = data;
-        const timestamp = new Date().toLocaleString();
+        const timestamp = getLocalTimestamp();
         
         // Parse the number or default to 6
         const maxNumber = parseInt(number) || 6;
@@ -341,7 +358,7 @@ io.on('connection', (socket) => {
 
     // Handle quote command
     socket.on('quote', () => {
-        const timestamp = new Date().toLocaleString();
+        const timestamp = getLocalTimestamp();
         
         const quotes = [
             "The only way to do great work is to love what you do. - Steve Jobs",
@@ -385,18 +402,36 @@ io.on('connection', (socket) => {
 
     // Handle time command
     socket.on('time', () => {
-        const timestamp = new Date().toLocaleString();
+        const timestamp = getLocalTimestamp();
         
         const now = new Date();
+        const localTime = getLocalTimestamp();
+        
+        // Get the local timezone name dynamically
+        const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const localTimeDisplay = now.toLocaleTimeString('en-US', { 
+            timeZone: 'America/New_York', // This matches our getLocalTimestamp function
+            hour12: true,
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+        
         const timeZones = [
+            { name: 'Your Local Time (EST/EDT)', time: localTimeDisplay, highlight: true },
             { name: 'UTC', time: now.toISOString().slice(11, 19) + ' UTC' },
-            { name: 'New York', time: now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true }) + ' EST/EDT' },
             { name: 'Los Angeles', time: now.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour12: true }) + ' PST/PDT' },
             { name: 'London', time: now.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour12: false }) + ' GMT/BST' },
             { name: 'Tokyo', time: now.toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour12: false }) + ' JST' }
         ];
         
-        const timeText = timeZones.map(tz => `**${tz.name}:** ${tz.time}`).join('\n');
+        const timeText = timeZones.map(tz => {
+            if (tz.highlight) {
+                return `🏠 **${tz.name}:** ${tz.time}`;
+            }
+            return `**${tz.name}:** ${tz.time}`;
+        }).join('\n');
         
         const timeMessage = {
             username: "🕐 World Clock",
@@ -416,7 +451,7 @@ io.on('connection', (socket) => {
     // Handle weather command
     socket.on('weather', (data) => {
         const { city } = data;
-        const timestamp = new Date().toLocaleString();
+        const timestamp = getLocalTimestamp();
         
         // Simulated weather data
         const weatherConditions = [
@@ -447,7 +482,7 @@ io.on('connection', (socket) => {
 
     // Handle trivia command
     socket.on('trivia', () => {
-        const timestamp = new Date().toLocaleString();
+        const timestamp = getLocalTimestamp();
         
         const triviaQuestions = [
             { q: "What is the capital of Australia?", a: "Canberra" },
@@ -492,7 +527,7 @@ io.on('connection', (socket) => {
     // Handle countdown command
     socket.on('countdown', (data) => {
         const { seconds } = data;
-        const timestamp = new Date().toLocaleString();
+        const timestamp = getLocalTimestamp();
         
         const countdownSeconds = Math.min(Math.max(parseInt(seconds) || 10, 1), 300); // 1-300 seconds
         
@@ -515,7 +550,7 @@ io.on('connection', (socket) => {
             const completeMessage = {
                 username: "⏰ Countdown Timer",
                 text: `🎉 **Time's Up!** The ${countdownSeconds}-second countdown has finished!`,
-                timestamp: new Date().toLocaleString()
+                timestamp: getLocalTimestamp()
             };
             
             messages.push(completeMessage);
@@ -530,7 +565,7 @@ io.on('connection', (socket) => {
     // Handle random command
     socket.on('random', (data) => {
         const { min, max } = data;
-        const timestamp = new Date().toLocaleString();
+        const timestamp = getLocalTimestamp();
         
         const minNum = parseInt(min) || 1;
         const maxNum = parseInt(max) || 100;

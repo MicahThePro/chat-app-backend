@@ -41,6 +41,9 @@ const messages = [];
 const maxMessages = 20;
 const onlineUsers = {};
 
+// Store active trivia sessions
+const activeTrivia = new Map(); // questionId -> { question, answer, askedBy, answeredBy: Set() }
+
 // Serve static files from current directory
 app.use(express.static(__dirname));
 
@@ -78,7 +81,69 @@ io.on('connection', (socket) => {
     });    // Handle new messages
     socket.on('message', (msg) => {
         const timestamp = getLocalTimestamp();
-          // Check for profanity in the message
+        
+        // Check for trivia answers first (before profanity filter)
+        const userAnswer = msg.text.trim().toLowerCase();
+        let triviaAnswered = false;
+        
+        for (const [questionId, session] of activeTrivia.entries()) {
+            // Check if this user already answered this question
+            if (session.answeredBy.has(socket.id)) {
+                continue;
+            }
+            
+            // Check if answer matches (allow partial matches and common variations)
+            const correctAnswer = session.answer.toLowerCase();
+            if (userAnswer === correctAnswer || 
+                correctAnswer.includes(userAnswer) && userAnswer.length > 2 ||
+                userAnswer.includes(correctAnswer)) {
+                
+                // Correct answer!
+                session.answeredBy.add(socket.id);
+                triviaAnswered = true;
+                
+                const successMessage = {
+                    username: "🧠 Trivia Bot",
+                    text: `🎉 **CORRECT!** ${msg.username} got it right!\n\n❓ ${session.question}\n✅ **Answer:** ${session.answer}\n\n🏆 Well done! Use /trivia for another question.`,
+                    timestamp: timestamp
+                };
+                
+                messages.push(successMessage);
+                if (messages.length > maxMessages) {
+                    messages.shift();
+                }
+                
+                activeTrivia.delete(questionId);
+                io.emit('message', successMessage);
+                console.log(`${msg.username} answered trivia correctly: ${session.answer}`);
+                return; // Don't process as regular message
+            } else if (userAnswer.length > 2) { // Only count substantial answers as wrong
+                // Wrong answer, but let them try again
+                session.answeredBy.add(socket.id);
+                
+                const wrongMessage = {
+                    username: "🧠 Trivia Bot", 
+                    text: `❌ Not quite, ${msg.username}! Keep guessing...`,
+                    timestamp: timestamp
+                };
+                
+                messages.push(wrongMessage);
+                if (messages.length > maxMessages) {
+                    messages.shift();
+                }
+                
+                io.emit('message', wrongMessage);
+                triviaAnswered = true;
+                return; // Don't process as regular message
+            }
+        }
+        
+        // If it was a trivia attempt, don't continue with normal message processing
+        if (triviaAnswered) {
+            return;
+        }
+        
+        // Check for profanity in the message
         if (filter.check(msg.text)) {
             // Send a message indicating profanity was attempted
             const profanityMessage = {
@@ -506,10 +571,20 @@ io.on('connection', (socket) => {
         ];
         
         const randomTrivia = triviaQuestions[Math.floor(Math.random() * triviaQuestions.length)];
+        const questionId = Date.now().toString(); // Simple unique ID
+        
+        // Store active trivia session
+        activeTrivia.set(questionId, {
+            question: randomTrivia.q,
+            answer: randomTrivia.a.toLowerCase(),
+            askedBy: socket.id,
+            answeredBy: new Set(),
+            timestamp: timestamp
+        });
         
         const triviaMessage = {
             username: "🧠 Trivia Bot",
-            text: `❓ **Trivia Question:**\n\n${randomTrivia.q}\n\n💡 **Answer:** ||${randomTrivia.a}|| (hover to reveal)`,
+            text: `❓ **Trivia Question #${questionId.slice(-4)}:**\n\n${randomTrivia.q}\n\n💭 Type your answer in chat to guess! Anyone can answer.`,
             timestamp: timestamp
         };
         
@@ -518,8 +593,28 @@ io.on('connection', (socket) => {
             messages.shift();
         }
         
-        console.log('Trivia command used');
+        console.log(`Trivia question asked: ${randomTrivia.q}`);
         io.emit('message', triviaMessage);
+        
+        // Auto-reveal answer after 60 seconds if no one gets it right
+        setTimeout(() => {
+            if (activeTrivia.has(questionId)) {
+                const session = activeTrivia.get(questionId);
+                const revealMessage = {
+                    username: "🧠 Trivia Bot",
+                    text: `⏰ **Time's up!** Question #${questionId.slice(-4)}\n\n❓ ${session.question}\n✅ **Answer:** ${session.answer}\n\n🤔 Better luck next time! Use /trivia for another question.`,
+                    timestamp: getLocalTimestamp()
+                };
+                
+                messages.push(revealMessage);
+                if (messages.length > maxMessages) {
+                    messages.shift();
+                }
+                
+                activeTrivia.delete(questionId);
+                io.emit('message', revealMessage);
+            }
+        }, 60000); // 60 seconds
     });
 
     // Handle countdown command

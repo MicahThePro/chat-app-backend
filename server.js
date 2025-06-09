@@ -3,6 +3,10 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 const filter = require('leo-profanity');
+const axios = require('axios');
+
+// Load environment variables
+require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
@@ -20,6 +24,9 @@ const io = socketIo(server, {
 });
 
 const PORT = process.env.PORT || 5000;
+
+// Weather API Configuration
+const WEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || 'b8a4f2e3c1d7b9f8a6e5d4c3b2a1f9e8'; // Demo key - replace with real key
 
 // Helper function to get local timestamp
 function getLocalTimestamp() {
@@ -123,7 +130,7 @@ io.on('connection', (socket) => {
                 
                 const wrongMessage = {
                     username: "🧠 Trivia Bot", 
-                    text: `❌ Not quite, ${msg.username}! Try again another time!`,
+                    text: `❌ Not quite, ${msg.username}! Keep guessing...`,
                     timestamp: timestamp
                 };
                 
@@ -512,35 +519,136 @@ io.on('connection', (socket) => {
     });
 
     // Handle weather command
-    socket.on('weather', (data) => {
+    socket.on('weather', async (data) => {
         const { city } = data;
         const timestamp = getLocalTimestamp();
         
-        // Simulated weather data
-        const weatherConditions = [
-            'Sunny ☀️', 'Partly Cloudy ⛅', 'Cloudy ☁️', 'Rainy 🌧️', 
-            'Stormy ⛈️', 'Snowy ❄️', 'Foggy 🌫️', 'Windy 💨'
-        ];
-        
-        const condition = weatherConditions[Math.floor(Math.random() * weatherConditions.length)];
-        const temp = Math.floor(Math.random() * 40) + 5; // 5-45°C
-        const humidity = Math.floor(Math.random() * 60) + 30; // 30-90%
-        
         const cityName = city || 'Unknown Location';
         
-        const weatherMessage = {
-            username: "🌤️ Weather Bot",
-            text: `🏙️ **Weather in ${cityName}:**\n\n🌡️ **Temperature:** ${temp}°C\n🌈 **Condition:** ${condition}\n💧 **Humidity:** ${humidity}%\n\n*Note: This is simulated weather data*`,
-            timestamp: timestamp
-        };
-        
-        messages.push(weatherMessage);
-        if (messages.length > maxMessages) {
-            messages.shift();
+        try {
+            // Try OpenWeatherMap API first
+            let response;
+            let isOpenWeatherMap = true;
+            
+            try {
+                response = await axios.get(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(cityName)}&appid=${WEATHER_API_KEY}&units=metric`);
+            } catch (error) {
+                // If OpenWeatherMap fails (likely invalid API key), try wttr.in as fallback
+                console.log('OpenWeatherMap failed, trying fallback service...');
+                isOpenWeatherMap = false;
+                response = await axios.get(`https://wttr.in/${encodeURIComponent(cityName)}?format=j1`);
+            }
+            
+            let weatherMessage;
+            
+            if (isOpenWeatherMap) {
+                // Parse OpenWeatherMap response
+                const weather = response.data;
+                const temp = Math.round(weather.main.temp);
+                const humidity = weather.main.humidity;
+                const condition = weather.weather[0].description;
+                const icon = weather.weather[0].main;
+                
+                // Map weather conditions to emojis
+                const weatherEmojis = {
+                    'Clear': '☀️',
+                    'Clouds': '☁️',
+                    'Rain': '🌧️',
+                    'Drizzle': '🌦️',
+                    'Thunderstorm': '⛈️',
+                    'Snow': '❄️',
+                    'Mist': '🌫️',
+                    'Smoke': '🌫️',
+                    'Haze': '🌫️',
+                    'Dust': '🌫️',
+                    'Fog': '🌫️',
+                    'Sand': '🌫️',
+                    'Ash': '🌫️',
+                    'Squall': '💨',
+                    'Tornado': '🌪️'
+                };
+                
+                const emoji = weatherEmojis[icon] || '🌤️';
+                
+                weatherMessage = {
+                    username: "🌤️ Weather Bot",
+                    text: `🏙️ **Weather in ${weather.name}, ${weather.sys.country}:**\n\n🌡️ **Temperature:** ${temp}°C (${Math.round(temp * 9/5 + 32)}°F)\n🌈 **Condition:** ${condition.charAt(0).toUpperCase() + condition.slice(1)} ${emoji}\n💧 **Humidity:** ${humidity}%\n🌬️ **Wind:** ${Math.round(weather.wind.speed)} m/s\n📍 **Coordinates:** ${weather.coord.lat}, ${weather.coord.lon}`,
+                    timestamp: timestamp
+                };
+            } else {
+                // Parse wttr.in response (fallback service)
+                const weather = response.data;
+                const current = weather.current_condition[0];
+                const location = weather.nearest_area[0];
+                
+                const temp = Math.round(current.temp_C);
+                const humidity = current.humidity;
+                const condition = current.weatherDesc[0].value;
+                
+                // Simple emoji mapping for wttr.in
+                const getWeatherEmoji = (desc) => {
+                    const lower = desc.toLowerCase();
+                    if (lower.includes('sunny') || lower.includes('clear')) return '☀️';
+                    if (lower.includes('cloud')) return '☁️';
+                    if (lower.includes('rain')) return '🌧️';
+                    if (lower.includes('storm')) return '⛈️';
+                    if (lower.includes('snow')) return '❄️';
+                    if (lower.includes('fog') || lower.includes('mist')) return '🌫️';
+                    return '🌤️';
+                };
+                
+                const emoji = getWeatherEmoji(condition);
+                
+                weatherMessage = {
+                    username: "🌤️ Weather Bot",
+                    text: `🏙️ **Weather in ${location.areaName[0].value}, ${location.country[0].value}:**\n\n🌡️ **Temperature:** ${temp}°C (${Math.round(temp * 9/5 + 32)}°F)\n🌈 **Condition:** ${condition} ${emoji}\n💧 **Humidity:** ${humidity}%\n🌬️ **Wind:** ${current.windspeedKmph} km/h\n\n💡 *Using backup weather service*`,
+                    timestamp: timestamp
+                };
+            }
+            
+            messages.push(weatherMessage);
+            if (messages.length > maxMessages) {
+                messages.shift();
+            }
+            
+            console.log(`Weather data retrieved for: ${cityName} (${isOpenWeatherMap ? 'OpenWeatherMap' : 'wttr.in'})`);
+            io.emit('message', weatherMessage);
+            
+        } catch (error) {
+            console.error('Weather API error:', error.message);
+            
+            let errorMessage = "Sorry, I couldn't fetch the weather data. ";
+            
+            if (error.response) {
+                // API responded with error status
+                if (error.response.status === 404) {
+                    errorMessage += `City "${cityName}" not found. Please check the spelling and try again.`;
+                } else if (error.response.status === 401) {
+                    errorMessage += "Weather service is temporarily unavailable.";
+                } else {
+                    errorMessage += `Weather service error (${error.response.status}).`;
+                }
+            } else if (error.request) {
+                // Request was made but no response received
+                errorMessage += "Unable to connect to weather service. Please try again later.";
+            } else {
+                // Something else happened
+                errorMessage += "An unexpected error occurred. Please try again.";
+            }
+            
+            const errorWeatherMessage = {
+                username: "🌤️ Weather Bot",
+                text: `🏙️ **Weather Request for ${cityName}:**\n\n❌ ${errorMessage}\n\n💡 **Tip:** Try using a major city name like "New York", "London", or "Toronto".`,
+                timestamp: timestamp
+            };
+            
+            messages.push(errorWeatherMessage);
+            if (messages.length > maxMessages) {
+                messages.shift();
+            }
+            
+            io.emit('message', errorWeatherMessage);
         }
-        
-        console.log(`Weather command used for: ${cityName}`);
-        io.emit('message', weatherMessage);
     });
 
     // Handle trivia command

@@ -23,11 +23,9 @@ const PORT = process.env.PORT || 5000;
 
 // Helper function to get local timestamp
 function getLocalTimestamp() {
-    // Get the system's local timezone automatically
-    const systemTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    
+    // Explicitly set to Central Time (CT) - covers both CST and CDT automatically
     return new Date().toLocaleString('en-US', { 
-        timeZone: systemTimeZone, // Use system's actual timezone
+        timeZone: 'America/Chicago', // Central Time Zone
         hour12: true,
         year: 'numeric',
         month: '2-digit',
@@ -407,10 +405,9 @@ io.on('connection', (socket) => {
         const now = new Date();
         const localTime = getLocalTimestamp();
         
-        // Get the local timezone name dynamically
-        const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        // Display Central Time as your local time
         const localTimeDisplay = now.toLocaleTimeString('en-US', { 
-            timeZone: localTimeZone, // Use actual system timezone
+            timeZone: 'America/Chicago', // Central Time Zone
             hour12: true,
             weekday: 'long',
             year: 'numeric',
@@ -419,7 +416,7 @@ io.on('connection', (socket) => {
         });
         
         const timeZones = [
-            { name: `Your Local Time (${localTimeZone})`, time: localTimeDisplay, highlight: true },
+            { name: 'Your Local Time (Central)', time: localTimeDisplay, highlight: true },
             { name: 'UTC', time: now.toISOString().slice(11, 19) + ' UTC' },
             { name: 'New York', time: now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true }) + ' EST/EDT' },
             { name: 'Los Angeles', time: now.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour12: true }) + ' PST/PDT' },

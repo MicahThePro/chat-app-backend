@@ -23,11 +23,11 @@ const PORT = process.env.PORT || 5000;
 
 // Helper function to get local timestamp
 function getLocalTimestamp() {
-    // You can change this timezone to match your location
-    // Common US timezones: 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'
-    // To find your timezone: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+    // Get the system's local timezone automatically
+    const systemTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    
     return new Date().toLocaleString('en-US', { 
-        timeZone: 'America/New_York', // Change this to your timezone
+        timeZone: systemTimeZone, // Use system's actual timezone
         hour12: true,
         year: 'numeric',
         month: '2-digit',
@@ -410,7 +410,7 @@ io.on('connection', (socket) => {
         // Get the local timezone name dynamically
         const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const localTimeDisplay = now.toLocaleTimeString('en-US', { 
-            timeZone: 'America/New_York', // This matches our getLocalTimestamp function
+            timeZone: localTimeZone, // Use actual system timezone
             hour12: true,
             weekday: 'long',
             year: 'numeric',
@@ -419,8 +419,9 @@ io.on('connection', (socket) => {
         });
         
         const timeZones = [
-            { name: 'Your Local Time (EST/EDT)', time: localTimeDisplay, highlight: true },
+            { name: `Your Local Time (${localTimeZone})`, time: localTimeDisplay, highlight: true },
             { name: 'UTC', time: now.toISOString().slice(11, 19) + ' UTC' },
+            { name: 'New York', time: now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true }) + ' EST/EDT' },
             { name: 'Los Angeles', time: now.toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour12: true }) + ' PST/PDT' },
             { name: 'London', time: now.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour12: false }) + ' GMT/BST' },
             { name: 'Tokyo', time: now.toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour12: false }) + ' JST' }

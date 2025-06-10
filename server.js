@@ -972,10 +972,94 @@ io.on('connection', (socket) => {
         
         // Check if API key is available
         if (!chatGPTApiKey || !openaiClient) {
+            // Even without ChatGPT API, we should still moderate the question using basic filter
+            if (filter.check(question)) {
+                const profanityMessage = {
+                    username: "System",
+                    text: `${username}'s ChatGPT question was blocked for inappropriate content!`,
+                    timestamp: timestamp
+                };
+                
+                messages.push(profanityMessage);
+                if (messages.length > maxMessages) {
+                    messages.shift();
+                }
+                
+                console.log(`Profanity filter blocked ChatGPT question from ${username}: ${question}`);
+                io.emit('message', profanityMessage);
+                return;
+            }
+            
+            // Question is clean but no API key available
             socket.emit('chatgpt api key required');
             return;
         }
         
+        // MODERATE THE CHATGPT QUESTION FIRST
+        try {
+            // Since ChatGPT is available, use AI moderation on the question
+            const moderationResult = await openaiClient.chat.completions.create({
+                model: selectedGPTModel,
+                messages: [
+                    {
+                        role: "system",
+                        content: "You are a chat moderator. Analyze the following ChatGPT question and determine if it contains inappropriate content (profanity, hate speech, harassment, harmful requests, or other inappropriate content). Respond with only 'SAFE' if the question is appropriate, or 'INAPPROPRIATE: [brief reason]' if it should be blocked. Be reasonable - don't block normal questions or mild language."
+                    },
+                    {
+                        role: "user",
+                        content: `ChatGPT question from user "${username}": "${question}"`
+                    }
+                ],
+                max_tokens: 50,
+                temperature: 0.1
+            });
+            
+            const moderationResponse = moderationResult.choices[0].message.content.trim();
+            
+            if (moderationResponse.startsWith('INAPPROPRIATE')) {
+                // AI detected inappropriate content in ChatGPT question
+                const reason = moderationResponse.split(':')[1]?.trim() || 'inappropriate content';
+                
+                const aiModerationMessage = {
+                    username: "🤖 AI Moderator",
+                    text: `⚠️ **ChatGPT Request Blocked**\n\n${username}'s ChatGPT question was blocked for: ${reason}\n\n🔍 *AI moderation protects ChatGPT requests too*`,
+                    timestamp: timestamp
+                };
+                
+                messages.push(aiModerationMessage);
+                if (messages.length > maxMessages) {
+                    messages.shift();
+                }
+                
+                console.log(`AI moderation blocked ChatGPT question from ${username}: ${reason}`);
+                io.emit('message', aiModerationMessage);
+                return; // Don't process the ChatGPT request
+            }
+            
+            console.log(`AI moderation approved ChatGPT question from ${username}`);
+            
+        } catch (moderationError) {
+            console.error('AI moderation error for ChatGPT question:', moderationError.message);
+            // Fall back to basic profanity filter for ChatGPT questions
+            if (filter.check(question)) {
+                const profanityMessage = {
+                    username: "System",
+                    text: `${username}'s ChatGPT question was blocked for inappropriate content! (AI moderation unavailable, using backup filter)`,
+                    timestamp: timestamp
+                };
+                
+                messages.push(profanityMessage);
+                if (messages.length > maxMessages) {
+                    messages.shift();
+                }
+                
+                console.log(`Backup profanity filter blocked ChatGPT question from ${username}: ${question}`);
+                io.emit('message', profanityMessage);
+                return;
+            }
+        }
+        
+        // Question passed moderation, now process ChatGPT request
         try {
             // Add user question to conversation history
             chatGPTConversation.push({

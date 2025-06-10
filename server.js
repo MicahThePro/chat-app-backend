@@ -62,16 +62,16 @@ const activeTrivia = new Map(); // questionId -> { question, answer, askedBy, an
 // Store blocked IPs per user
 const userBlockedIPs = new Map(); // socketId -> Set of blocked IP addresses
 
-// Serve static files from current directory
-app.use(express.static(__dirname));
+// Serve static files from frontend directory
+app.use(express.static(path.join(__dirname, '../frontend')));
 
 // Routes
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    res.sendFile(path.join(__dirname, '../frontend/index.html'));
 });
 
 app.get('/room1', (req, res) => {
-    res.sendFile(path.join(__dirname, 'room1.html'));
+    res.sendFile(path.join(__dirname, '../frontend/room1.html'));
 });
 
 app.get('/health', (req, res) => {
@@ -94,6 +94,9 @@ io.on('connection', (socket) => {
         // Broadcast user joined
         io.emit('user joined', username);
         
+        // Broadcast updated online users list
+        io.emit('online users update', { onlineUsers: Object.keys(onlineUsers) });
+        
         // Send last 20 messages to new user (filtered by their blocked IPs)
         const filteredMessages = messages.filter(msg => 
             !userBlockedIPs.get(socket.id)?.has(msg.ip)
@@ -103,6 +106,70 @@ io.on('connection', (socket) => {
     socket.on('message', async (msg) => {
         const timestamp = getLocalTimestamp();
         const userIP = socket.handshake.address;
+        
+        // Check for DM pattern: @username message
+        const dmMatch = msg.text.match(/^@(\w+)\s+(.+)$/);
+        if (dmMatch) {
+            const targetUsername = dmMatch[1];
+            const dmMessage = dmMatch[2];
+            
+            // Find the target user's socket ID
+            const targetSocketId = onlineUsers[targetUsername];
+            
+            if (targetSocketId) {
+                // Check if the target user has blocked the sender
+                const targetSocket = io.sockets.sockets.get(targetSocketId);
+                const targetBlockedIPs = userBlockedIPs.get(targetSocketId);
+                
+                if (targetBlockedIPs && targetBlockedIPs.has(userIP)) {
+                    // Target user has blocked the sender
+                    const blockedMessage = {
+                        username: "System",
+                        text: `❌ Your DM to "${targetUsername}" was not delivered. You may be blocked by this user.`,
+                        timestamp: timestamp
+                    };
+                    socket.emit('message', blockedMessage);
+                    return;
+                }
+                
+                // NO CONTENT MODERATION FOR DMs - Send directly without filtering
+                const dmToTarget = {
+                    username: `📩 DM from ${msg.username}`,
+                    text: `**Private Message:** ${dmMessage}`,
+                    timestamp: timestamp,
+                    isDM: true,
+                    fromUser: msg.username,
+                    toUser: targetUsername,
+                    ip: userIP // Include IP for potential blocking
+                };
+                
+                // Send confirmation to sender
+                const dmConfirmation = {
+                    username: `📤 DM sent to ${targetUsername}`,
+                    text: `**Your message:** ${dmMessage}`,
+                    timestamp: timestamp,
+                    isDM: true,
+                    fromUser: msg.username,
+                    toUser: targetUsername
+                };
+                
+                // Send to both users only
+                io.to(targetSocketId).emit('message', dmToTarget);
+                socket.emit('message', dmConfirmation);
+                
+                console.log(`DM from ${msg.username} to ${targetUsername}: ${dmMessage} (NO MODERATION)`);
+                return; // Don't process as regular message
+            } else {
+                // User not found or offline
+                const errorMessage = {
+                    username: "System",
+                    text: `❌ User "${targetUsername}" not found or offline. DM not sent.`,
+                    timestamp: timestamp
+                };
+                socket.emit('message', errorMessage);
+                return;
+            }
+        }
         
         // Check for trivia answers first (before profanity filter)
         const userAnswer = msg.text.trim().toLowerCase();
@@ -1164,6 +1231,8 @@ io.on('connection', (socket) => {
         if (onlineUsers[username]) {
             delete onlineUsers[username];
             io.emit('user left', username);
+            // Broadcast updated online users list
+            io.emit('online users update', { onlineUsers: Object.keys(onlineUsers) });
         }
     });
 
@@ -1221,6 +1290,22 @@ io.on('connection', (socket) => {
     // Handle disconnect
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
+        
+        // Remove user from online users list
+        let disconnectedUsername = null;
+        for (const [username, socketId] of Object.entries(onlineUsers)) {
+            if (socketId === socket.id) {
+                disconnectedUsername = username;
+                delete onlineUsers[username];
+                break;
+            }
+        }
+        
+        // Broadcast updated online users list
+        if (disconnectedUsername) {
+            io.emit('user left', disconnectedUsername);
+            io.emit('online users update', { onlineUsers: Object.keys(onlineUsers) });
+        }
         
         // Check if this user was the ChatGPT API provider
         if (socket.id === chatGPTEnabledBy) {

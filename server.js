@@ -47,7 +47,12 @@ function getLocalTimestamp() {
 const messages = [];
 const maxMessages = 20;
 const onlineUsers = {};
-const userIPs = new Map(); // Track user IPs
+
+// Store active trivia sessions
+const activeTrivia = new Map(); // questionId -> { question, answer, askedBy, answeredBy: Set() }
+
+// Store blocked IPs per user
+const userBlockedIPs = new Map(); // socketId -> Set of blocked IP addresses
 
 // Serve static files from current directory
 app.use(express.static(__dirname));
@@ -68,33 +73,28 @@ app.get('/health', (req, res) => {
 // Socket.IO connection handling
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
-    
-    // Store user IP
-    const userIP = socket.handshake.address || socket.request.connection.remoteAddress || 'unknown';
-    userIPs.set(socket.id, userIP);
 
     // Handle user joining
     socket.on('join', (data) => {
         const { username } = data;
-        const userIP = userIPs.get(socket.id) || 'unknown';
+        const userIP = socket.handshake.address;
         
         console.log(`User ${username} joined from IP: ${userIP}`);
         
-        onlineUsers[username] = { socketId: socket.id, ip: userIP };
+        onlineUsers[username] = socket.id;
         
-        // Broadcast user joined with IP
-        io.emit('user joined', { username, ip: userIP });
+        // Broadcast user joined
+        io.emit('user joined', username);
         
-        // Send last 20 messages to new user with IP addresses
-        const messagesWithIPs = messages.map(msg => ({
-            ...msg,
-            ip: msg.ip || 'unknown'
-        }));
-        socket.emit('load messages', messagesWithIPs);
+        // Send last 20 messages to new user (filtered by their blocked IPs)
+        const filteredMessages = messages.filter(msg => 
+            !userBlockedIPs.get(socket.id)?.has(msg.ip)
+        );
+        socket.emit('load messages', filteredMessages);
     });    // Handle new messages
     socket.on('message', (msg) => {
         const timestamp = getLocalTimestamp();
-        const userIP = userIPs.get(socket.id) || 'unknown';
+        const userIP = socket.handshake.address;
         
         // Check for trivia answers first (before profanity filter)
         const userAnswer = msg.text.trim().toLowerCase();
@@ -191,15 +191,18 @@ io.on('connection', (socket) => {
             messages.shift();
         }
         
-        console.log(`Message from ${msg.username} (${userIP}): ${msg.text}`);
+        console.log(`Message from ${msg.username}: ${msg.text}`);
         
-        // Broadcast message to all users with IP
-        io.emit('message', messageWithTimestamp);
+        // Broadcast message to all users (filtered per user's blocked IPs)
+        for (const [socketId, socket] of io.sockets.sockets) {
+            if (!userBlockedIPs.get(socketId)?.has(userIP)) {
+                socket.emit('message', messageWithTimestamp);
+            }
+        }
     });// Handle 8-ball command
     socket.on('8ball', (data) => {
         const { question } = data;
         const timestamp = getLocalTimestamp();
-        const userIP = userIPs.get(socket.id) || 'unknown';
         
         // Magic 8-Ball responses
         const responses = [
@@ -232,16 +235,18 @@ io.on('connection', (socket) => {
         const eightBallMessage = {
             username: "🎱 8-Ball",
             text: `🔮 "${question}"\n\n${randomResponse}`,
-            timestamp: timestamp,
-            ip: 'bot'
+            timestamp: timestamp
         };
         
+        // Store message (keep only last 20)
         messages.push(eightBallMessage);
         if (messages.length > maxMessages) {
             messages.shift();
         }
         
         console.log(`8-Ball responded to: ${question}`);
+        
+        // Broadcast 8-Ball response to all users
         io.emit('message', eightBallMessage);
     });
 
@@ -365,8 +370,7 @@ io.on('connection', (socket) => {
         const jokeMessage = {
             username: "😂 Joke Bot",
             text: `🎭 ${randomJoke}`,
-            timestamp: timestamp,
-            ip: 'bot'
+            timestamp: timestamp
         };
         
         // Store message (keep only last 20)
@@ -813,22 +817,74 @@ io.on('connection', (socket) => {
             delete onlineUsers[username];
             io.emit('user left', username);
         }
-        userIPs.delete(socket.id);
+    });
+
+    // Handle block user by IP
+    socket.on('block user', (data) => {
+        const { targetIP } = data;
+        
+        if (!userBlockedIPs.has(socket.id)) {
+            userBlockedIPs.set(socket.id, new Set());
+        }
+        
+        userBlockedIPs.get(socket.id).add(targetIP);
+        
+        // Send filtered messages (excluding blocked IPs) to the blocking user
+        const filteredMessages = messages.filter(msg => 
+            !userBlockedIPs.get(socket.id)?.has(msg.ip)
+        );
+        
+        socket.emit('load messages', filteredMessages);
+        socket.emit('user blocked', { blockedIP: targetIP });
+        
+        console.log(`User ${socket.id} blocked IP: ${targetIP}`);
+    });
+
+    // Handle unblock user by IP  
+    socket.on('unblock user', (data) => {
+        const { targetIP } = data;
+        
+        if (userBlockedIPs.has(socket.id)) {
+            userBlockedIPs.get(socket.id).delete(targetIP);
+            
+            // If no more blocked IPs for this user, remove the entry
+            if (userBlockedIPs.get(socket.id).size === 0) {
+                userBlockedIPs.delete(socket.id);
+            }
+        }
+        
+        // Send all messages back to the user (no longer filtered)
+        const filteredMessages = messages.filter(msg => 
+            !userBlockedIPs.get(socket.id)?.has(msg.ip)
+        );
+        
+        socket.emit('load messages', filteredMessages);
+        socket.emit('user unblocked', { unblockedIP: targetIP });
+        
+        console.log(`User ${socket.id} unblocked IP: ${targetIP}`);
+    });
+
+    // Handle get blocked users list
+    socket.on('get blocked users', () => {
+        const blockedIPs = userBlockedIPs.get(socket.id) || new Set();
+        socket.emit('blocked users list', { blockedIPs: Array.from(blockedIPs) });
     });
 
     // Handle disconnect
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         
+        // Clean up blocked IPs for this user
+        userBlockedIPs.delete(socket.id);
+        
         // Find and remove user from online users
-        for (const [username, userData] of Object.entries(onlineUsers)) {
-            if (userData.socketId === socket.id) {
+        for (const [username, id] of Object.entries(onlineUsers)) {
+            if (id === socket.id) {
                 delete onlineUsers[username];
                 io.emit('user left', username);
                 break;
             }
         }
-        userIPs.delete(socket.id);
     });
 });
 

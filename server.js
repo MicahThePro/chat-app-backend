@@ -33,6 +33,7 @@ const WEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || 'b8a4f2e3c1d7b9f8a6e5
 let chatGPTApiKey = null;
 let chatGPTEnabledBy = null; // Track who enabled ChatGPT
 let openaiClient = null;
+let chatGPTConversation = []; // Store conversation history
 
 // Helper function to get local timestamp
 function getLocalTimestamp() {
@@ -874,6 +875,7 @@ io.on('connection', (socket) => {
             chatGPTApiKey = null;
             chatGPTEnabledBy = null;
             openaiClient = null;
+            chatGPTConversation = []; // Clear conversation history
             
             console.log(`ChatGPT API deactivated by user: ${socket.id}`);
             
@@ -910,45 +912,44 @@ io.on('connection', (socket) => {
         }
         
         try {
-            // Send loading message
-            const loadingMessage = {
-                username: "🤖 ChatGPT",
-                text: `🤔 **Thinking about:** "${question}"\n\n⏳ Please wait while I generate a response...`,
-                timestamp: timestamp
-            };
+            // Add user question to conversation history
+            chatGPTConversation.push({
+                role: "user",
+                content: question
+            });
             
-            messages.push(loadingMessage);
-            if (messages.length > maxMessages) {
-                messages.shift();
+            // Keep conversation history to last 10 messages to avoid token limits
+            if (chatGPTConversation.length > 20) {
+                chatGPTConversation = chatGPTConversation.slice(-20);
             }
             
-            io.emit('message', loadingMessage);
+            // Make request to OpenAI with conversation context
+            const messages = [
+                {
+                    role: "system",
+                    content: "You are a helpful assistant in a chat room. Keep responses concise and friendly. Limit responses to 500 characters or less when possible. Remember previous messages in this conversation."
+                },
+                ...chatGPTConversation
+            ];
             
-            // Make request to OpenAI
             const completion = await openaiClient.chat.completions.create({
                 model: "gpt-3.5-turbo",
-                messages: [
-                    {
-                        role: "system",
-                        content: "You are a helpful assistant in a chat room. Keep responses concise and friendly. Limit responses to 500 characters or less when possible."
-                    },
-                    {
-                        role: "user",
-                        content: question
-                    }
-                ],
+                messages: messages,
                 max_tokens: 200,
                 temperature: 0.7
             });
             
             const response = completion.choices[0].message.content.trim();
             
-            // Remove the loading message and add the actual response
-            messages.pop(); // Remove loading message
+            // Add ChatGPT response to conversation history
+            chatGPTConversation.push({
+                role: "assistant",
+                content: response
+            });
             
             const chatGPTMessage = {
                 username: "🤖 ChatGPT",
-                text: `❓ **Question:** "${question}"\n\n💬 **Response:**\n${response}`,
+                text: response,
                 timestamp: timestamp
             };
             
@@ -963,11 +964,6 @@ io.on('connection', (socket) => {
         } catch (error) {
             console.error('ChatGPT API error:', error.message);
             
-            // Remove loading message if it exists
-            if (messages.length > 0 && messages[messages.length - 1].username === "🤖 ChatGPT" && messages[messages.length - 1].text.includes("Please wait")) {
-                messages.pop();
-            }
-            
             const errorMessage = {
                 username: "🤖 ChatGPT System",
                 text: `❌ **Error processing your request**\n\nSorry, I encountered an error while processing: "${question}"\n\n🔧 This might be due to API limits or connectivity issues. Please try again later.`,
@@ -980,6 +976,30 @@ io.on('connection', (socket) => {
             }
             
             io.emit('message', errorMessage);
+        }
+    });
+
+    // Handle clear ChatGPT memory command (only for API provider)
+    socket.on('clear chatgpt memory', () => {
+        if (socket.id === chatGPTEnabledBy) {
+            chatGPTConversation = [];
+            
+            const timestamp = getLocalTimestamp();
+            const clearMessage = {
+                username: "🤖 ChatGPT System",
+                text: `🧠 **Memory Cleared**\n\nChatGPT's conversation history has been reset by the API provider.`,
+                timestamp: timestamp
+            };
+            
+            messages.push(clearMessage);
+            if (messages.length > maxMessages) {
+                messages.shift();
+            }
+            
+            io.emit('message', clearMessage);
+            console.log(`ChatGPT memory cleared by API provider: ${socket.id}`);
+        } else {
+            socket.emit('error', { message: 'You are not authorized to clear ChatGPT memory.' });
         }
     });
 
@@ -1063,6 +1083,7 @@ io.on('connection', (socket) => {
             chatGPTApiKey = null;
             chatGPTEnabledBy = null;
             openaiClient = null;
+            chatGPTConversation = []; // Clear conversation history
             
             // Notify all users that ChatGPT has been deactivated
             io.emit('chatgpt api deactivated');

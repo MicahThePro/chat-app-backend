@@ -34,6 +34,7 @@ let chatGPTApiKey = null;
 let chatGPTEnabledBy = null; // Track who enabled ChatGPT
 let openaiClient = null;
 let chatGPTConversation = []; // Store conversation history
+let selectedGPTModel = 'gpt-4o-mini'; // Default model
 
 // Helper function to get local timestamp
 function getLocalTimestamp() {
@@ -813,7 +814,7 @@ io.on('connection', (socket) => {
 
     // Handle ChatGPT API key submission
     socket.on('submit chatgpt api key', async (data) => {
-        const { apiKey } = data;
+        const { apiKey, model } = data;
         const timestamp = getLocalTimestamp();
         
         try {
@@ -825,8 +826,9 @@ io.on('connection', (socket) => {
             chatGPTApiKey = apiKey;
             chatGPTEnabledBy = socket.id;
             openaiClient = testClient;
+            selectedGPTModel = model || 'gpt-4o-mini'; // Use selected model or default
             
-            console.log(`ChatGPT API enabled by user: ${socket.id}`);
+            console.log(`ChatGPT API enabled by user: ${socket.id} with model: ${selectedGPTModel}`);
             
             // Notify the user who submitted the key
             socket.emit('chatgpt api key status', { 
@@ -902,7 +904,7 @@ io.on('connection', (socket) => {
 
     // Handle ChatGPT command
     socket.on('chatgpt', async (data) => {
-        const { question } = data;
+        const { question, username } = data;
         const timestamp = getLocalTimestamp();
         
         // Check if API key is available
@@ -933,7 +935,7 @@ io.on('connection', (socket) => {
             ];
             
             const completion = await openaiClient.chat.completions.create({
-                model: "gpt-3.5-turbo",
+                model: selectedGPTModel,
                 messages: messages,
                 max_tokens: 200,
                 temperature: 0.7
@@ -949,7 +951,7 @@ io.on('connection', (socket) => {
             
             const chatGPTMessage = {
                 username: "🤖 ChatGPT",
-                text: response,
+                text: `${username} told ChatGPT "${question}" - ChatGPT said "${response}"`,
                 timestamp: timestamp
             };
             
@@ -958,7 +960,7 @@ io.on('connection', (socket) => {
                 messages.shift();
             }
             
-            console.log(`ChatGPT response generated for question: ${question}`);
+            console.log(`ChatGPT response generated for ${username}'s question: ${question}`);
             io.emit('message', chatGPTMessage);
             
         } catch (error) {

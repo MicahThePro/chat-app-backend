@@ -84,8 +84,16 @@ io.on('connection', (socket) => {
 
     // Handle user joining
     socket.on('join', (data) => {
-        const { username } = data;
+        let { username } = data;
         const userIP = socket.handshake.address;
+        
+        // Clean username on server side as backup
+        username = username.replace(/[^a-zA-Z0-9_]/g, '');
+        
+        if (username.length === 0) {
+            socket.emit('error', { message: 'Invalid username. Please use only letters, numbers, and underscores.' });
+            return;
+        }
         
         console.log(`User ${username} joined from IP: ${userIP}`);
         

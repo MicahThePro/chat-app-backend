@@ -100,7 +100,7 @@ io.on('connection', (socket) => {
         );
         socket.emit('load messages', filteredMessages);
     });    // Handle new messages
-    socket.on('message', (msg) => {
+    socket.on('message', async (msg) => {
         const timestamp = getLocalTimestamp();
         const userIP = socket.handshake.address;
         
@@ -165,26 +165,89 @@ io.on('connection', (socket) => {
             return;
         }
         
-        // Check for profanity in the message
-        if (filter.check(msg.text)) {
-            // Send a message indicating profanity was attempted
-            const profanityMessage = {
-                username: "System",
-                text: `${msg.username} tried to send a swear word!`,
-                timestamp: timestamp
-            };
-            
-            // Store the profanity warning message
-            messages.push(profanityMessage);
-            if (messages.length > maxMessages) {
-                messages.shift();
+        // AI Moderation vs Regular Profanity Filter
+        if (chatGPTApiKey && openaiClient) {
+            // Use AI moderation when ChatGPT is available
+            try {
+                const moderationResult = await openaiClient.chat.completions.create({
+                    model: selectedGPTModel,
+                    messages: [
+                        {
+                            role: "system",
+                            content: "You are a chat moderator. Analyze the following message and determine if it contains inappropriate content (profanity, hate speech, harassment, spam, or other harmful content). Respond with only 'SAFE' if the message is appropriate, or 'INAPPROPRIATE: [brief reason]' if it should be blocked. Be reasonable - don't block normal conversation, jokes, or mild language."
+                        },
+                        {
+                            role: "user",
+                            content: `Message from user "${msg.username}": "${msg.text}"`
+                        }
+                    ],
+                    max_tokens: 50,
+                    temperature: 0.1
+                });
+                
+                const moderationResponse = moderationResult.choices[0].message.content.trim();
+                
+                if (moderationResponse.startsWith('INAPPROPRIATE')) {
+                    // AI detected inappropriate content
+                    const reason = moderationResponse.split(':')[1]?.trim() || 'inappropriate content';
+                    
+                    const aiModerationMessage = {
+                        username: "🤖 AI Moderator",
+                        text: `⚠️ **Message Blocked**\n\n${msg.username}'s message was blocked for: ${reason}\n\n🔍 *AI moderation is active*`,
+                        timestamp: timestamp
+                    };
+                    
+                    messages.push(aiModerationMessage);
+                    if (messages.length > maxMessages) {
+                        messages.shift();
+                    }
+                    
+                    console.log(`AI moderation blocked message from ${msg.username}: ${reason}`);
+                    io.emit('message', aiModerationMessage);
+                    return; // Don't process the original message
+                }
+                
+                // If AI says it's safe, continue processing the message
+                console.log(`AI moderation approved message from ${msg.username}`);
+                
+            } catch (error) {
+                console.error('AI moderation error:', error.message);
+                // Fall back to regular profanity filter if AI moderation fails
+                if (filter.check(msg.text)) {
+                    const profanityMessage = {
+                        username: "System",
+                        text: `${msg.username} tried to send a swear word! (AI moderation unavailable, using backup filter)`,
+                        timestamp: timestamp
+                    };
+                    
+                    messages.push(profanityMessage);
+                    if (messages.length > maxMessages) {
+                        messages.shift();
+                    }
+                    
+                    console.log(`Backup profanity filter blocked message from ${msg.username}: ${msg.text}`);
+                    io.emit('message', profanityMessage);
+                    return;
+                }
             }
-            
-            console.log(`Profanity blocked from ${msg.username}: ${msg.text}`);
-            
-            // Broadcast the profanity warning to all users
-            io.emit('message', profanityMessage);
-            return; // Don't process the original message
+        } else {
+            // Use regular profanity filter when ChatGPT is not available
+            if (filter.check(msg.text)) {
+                const profanityMessage = {
+                    username: "System",
+                    text: `${msg.username} tried to send a swear word!`,
+                    timestamp: timestamp
+                };
+                
+                messages.push(profanityMessage);
+                if (messages.length > maxMessages) {
+                    messages.shift();
+                }
+                
+                console.log(`Profanity blocked from ${msg.username}: ${msg.text}`);
+                io.emit('message', profanityMessage);
+                return; // Don't process the original message
+            }
         }
         
         const messageWithTimestamp = {
@@ -847,7 +910,7 @@ io.on('connection', (socket) => {
             // Send announcement message to chat
             const announcementMessage = {
                 username: "🤖 ChatGPT System",
-                text: `✅ **ChatGPT is now ACTIVE!**\n\nUse \`/chatgpt [question]\` to ask ChatGPT anything!\n\n🔧 The API provider can deactivate it anytime using the red button.`,
+                text: `✅ **ChatGPT is now ACTIVE!**\n\nUse \`/chatgpt [question]\` to ask ChatGPT anything!\n\n🛡️ **AI Moderation:** All messages will now be moderated by AI instead of basic profanity filter.\n\n🔧 The API provider can deactivate it anytime using the red button.`,
                 timestamp: timestamp
             };
             
@@ -887,7 +950,7 @@ io.on('connection', (socket) => {
             // Send announcement message to chat
             const deactivationMessage = {
                 username: "🤖 ChatGPT System",
-                text: `❌ **ChatGPT has been DEACTIVATED**\n\nThe API provider has disabled ChatGPT access.\n\n🔑 To use ChatGPT again, someone needs to provide a new API key.`,
+                text: `❌ **ChatGPT has been DEACTIVATED**\n\nThe API provider has disabled ChatGPT access.\n\n🛡️ **Moderation:** Chat is now using basic profanity filter.\n\n🔑 To use ChatGPT again, someone needs to provide a new API key.`,
                 timestamp: timestamp
             };
             
@@ -1093,7 +1156,7 @@ io.on('connection', (socket) => {
             // Send announcement message to chat
             const deactivationMessage = {
                 username: "🤖 ChatGPT System",
-                text: `❌ **ChatGPT has been DEACTIVATED**\n\nThe API provider has disconnected.\n\n🔑 To use ChatGPT again, someone needs to provide a new API key.`,
+                text: `❌ **ChatGPT has been DEACTIVATED**\n\nThe API provider has disconnected.\n\n🛡️ **Moderation:** Chat is now using basic profanity filter.\n\n🔑 To use ChatGPT again, someone needs to provide a new API key.`,
                 timestamp: timestamp
             };
             

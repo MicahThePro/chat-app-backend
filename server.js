@@ -4,6 +4,7 @@ const socketIo = require('socket.io');
 const path = require('path');
 const filter = require('leo-profanity');
 const axios = require('axios');
+const OpenAI = require('openai');
 
 // Load environment variables
 require('dotenv').config();
@@ -27,6 +28,11 @@ const PORT = process.env.PORT || 5000;
 
 // Weather API Configuration
 const WEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || 'b8a4f2e3c1d7b9f8a6e5d4c3b2a1f9e8'; // Demo key - replace with real key
+
+// ChatGPT API Configuration
+let chatGPTApiKey = null;
+let chatGPTEnabledBy = null; // Track who enabled ChatGPT
+let openaiClient = null;
 
 // Helper function to get local timestamp
 function getLocalTimestamp() {
@@ -804,6 +810,179 @@ io.on('connection', (socket) => {
         io.emit('message', randomMessage);
     });
 
+    // Handle ChatGPT API key submission
+    socket.on('submit chatgpt api key', async (data) => {
+        const { apiKey } = data;
+        const timestamp = getLocalTimestamp();
+        
+        try {
+            // Test the API key by making a simple request
+            const testClient = new OpenAI({ apiKey: apiKey });
+            await testClient.models.list(); // Simple test request
+            
+            // If successful, store the API key and client
+            chatGPTApiKey = apiKey;
+            chatGPTEnabledBy = socket.id;
+            openaiClient = testClient;
+            
+            console.log(`ChatGPT API enabled by user: ${socket.id}`);
+            
+            // Notify the user who submitted the key
+            socket.emit('chatgpt api key status', { 
+                success: true, 
+                message: 'API key validated successfully! ChatGPT is now enabled for everyone.',
+                isKeyProvider: true
+            });
+            
+            // Notify all other users that ChatGPT is now available
+            socket.broadcast.emit('chatgpt api key status', { 
+                success: true, 
+                message: 'ChatGPT is now available! Someone has provided an API key.',
+                isKeyProvider: false
+            });
+            
+            // Send announcement message to chat
+            const announcementMessage = {
+                username: "🤖 ChatGPT System",
+                text: `✅ **ChatGPT is now ACTIVE!**\n\nUse \`/chatgpt [question]\` to ask ChatGPT anything!\n\n🔧 The API provider can deactivate it anytime using the red button.`,
+                timestamp: timestamp
+            };
+            
+            messages.push(announcementMessage);
+            if (messages.length > maxMessages) {
+                messages.shift();
+            }
+            
+            io.emit('message', announcementMessage);
+            
+        } catch (error) {
+            console.error('Invalid ChatGPT API key:', error.message);
+            socket.emit('chatgpt api key status', { 
+                success: false, 
+                message: 'Invalid API key. Please check your OpenAI API key and try again.',
+                isKeyProvider: false
+            });
+        }
+    });
+
+    // Handle ChatGPT API deactivation
+    socket.on('deactivate chatgpt api', () => {
+        if (socket.id === chatGPTEnabledBy) {
+            const timestamp = getLocalTimestamp();
+            
+            // Clear the API key and client
+            chatGPTApiKey = null;
+            chatGPTEnabledBy = null;
+            openaiClient = null;
+            
+            console.log(`ChatGPT API deactivated by user: ${socket.id}`);
+            
+            // Notify all users that ChatGPT has been deactivated
+            io.emit('chatgpt api deactivated');
+            
+            // Send announcement message to chat
+            const deactivationMessage = {
+                username: "🤖 ChatGPT System",
+                text: `❌ **ChatGPT has been DEACTIVATED**\n\nThe API provider has disabled ChatGPT access.\n\n🔑 To use ChatGPT again, someone needs to provide a new API key.`,
+                timestamp: timestamp
+            };
+            
+            messages.push(deactivationMessage);
+            if (messages.length > maxMessages) {
+                messages.shift();
+            }
+            
+            io.emit('message', deactivationMessage);
+        } else {
+            socket.emit('error', { message: 'You are not authorized to deactivate ChatGPT.' });
+        }
+    });
+
+    // Handle ChatGPT command
+    socket.on('chatgpt', async (data) => {
+        const { question } = data;
+        const timestamp = getLocalTimestamp();
+        
+        // Check if API key is available
+        if (!chatGPTApiKey || !openaiClient) {
+            socket.emit('chatgpt api key required');
+            return;
+        }
+        
+        try {
+            // Send loading message
+            const loadingMessage = {
+                username: "🤖 ChatGPT",
+                text: `🤔 **Thinking about:** "${question}"\n\n⏳ Please wait while I generate a response...`,
+                timestamp: timestamp
+            };
+            
+            messages.push(loadingMessage);
+            if (messages.length > maxMessages) {
+                messages.shift();
+            }
+            
+            io.emit('message', loadingMessage);
+            
+            // Make request to OpenAI
+            const completion = await openaiClient.chat.completions.create({
+                model: "gpt-3.5-turbo",
+                messages: [
+                    {
+                        role: "system",
+                        content: "You are a helpful assistant in a chat room. Keep responses concise and friendly. Limit responses to 500 characters or less when possible."
+                    },
+                    {
+                        role: "user",
+                        content: question
+                    }
+                ],
+                max_tokens: 200,
+                temperature: 0.7
+            });
+            
+            const response = completion.choices[0].message.content.trim();
+            
+            // Remove the loading message and add the actual response
+            messages.pop(); // Remove loading message
+            
+            const chatGPTMessage = {
+                username: "🤖 ChatGPT",
+                text: `❓ **Question:** "${question}"\n\n💬 **Response:**\n${response}`,
+                timestamp: timestamp
+            };
+            
+            messages.push(chatGPTMessage);
+            if (messages.length > maxMessages) {
+                messages.shift();
+            }
+            
+            console.log(`ChatGPT response generated for question: ${question}`);
+            io.emit('message', chatGPTMessage);
+            
+        } catch (error) {
+            console.error('ChatGPT API error:', error.message);
+            
+            // Remove loading message if it exists
+            if (messages.length > 0 && messages[messages.length - 1].username === "🤖 ChatGPT" && messages[messages.length - 1].text.includes("Please wait")) {
+                messages.pop();
+            }
+            
+            const errorMessage = {
+                username: "🤖 ChatGPT System",
+                text: `❌ **Error processing your request**\n\nSorry, I encountered an error while processing: "${question}"\n\n🔧 This might be due to API limits or connectivity issues. Please try again later.`,
+                timestamp: timestamp
+            };
+            
+            messages.push(errorMessage);
+            if (messages.length > maxMessages) {
+                messages.shift();
+            }
+            
+            io.emit('message', errorMessage);
+        }
+    });
+
     // Handle clear messages
     socket.on('clear messages', () => {
         messages.length = 0; // Clear all messages
@@ -873,6 +1052,35 @@ io.on('connection', (socket) => {
     // Handle disconnect
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
+        
+        // Check if this user was the ChatGPT API provider
+        if (socket.id === chatGPTEnabledBy) {
+            const timestamp = getLocalTimestamp();
+            
+            console.log('ChatGPT API provider disconnected, deactivating ChatGPT');
+            
+            // Clear the API key and client
+            chatGPTApiKey = null;
+            chatGPTEnabledBy = null;
+            openaiClient = null;
+            
+            // Notify all users that ChatGPT has been deactivated
+            io.emit('chatgpt api deactivated');
+            
+            // Send announcement message to chat
+            const deactivationMessage = {
+                username: "🤖 ChatGPT System",
+                text: `❌ **ChatGPT has been DEACTIVATED**\n\nThe API provider has disconnected.\n\n🔑 To use ChatGPT again, someone needs to provide a new API key.`,
+                timestamp: timestamp
+            };
+            
+            messages.push(deactivationMessage);
+            if (messages.length > maxMessages) {
+                messages.shift();
+            }
+            
+            io.emit('message', deactivationMessage);
+        }
         
         // Clean up blocked IPs for this user
         userBlockedIPs.delete(socket.id);
